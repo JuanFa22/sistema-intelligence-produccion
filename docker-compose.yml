@@ -1,0 +1,55 @@
+# Uso:
+#   docker compose up -d                      -> solo Redis (para correr la API local con uvicorn)
+#   docker compose --profile full up -d --build -> Redis + Phoenix + API (todo en contenedores)
+# Antes de usar el perfil "full": cerrá "phoenix serve" y "uvicorn" locales (puertos 6006 y 8000) y tené el .env listo.
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: intelligence-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]   # persistencia en disco: sobrevive al reinicio del contenedor
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: intelligence-phoenix
+    profiles: ["full"]
+    ports:
+      - "6006:6006"
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    volumes:
+      - phoenix-data:/mnt/data
+
+  api:
+    build: .
+    container_name: intelligence-api
+    profiles: ["full"]
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      PHOENIX_URL: http://phoenix:6006
+      OBSERVABILITY: phoenix
+      CHROMA_DIR: /data/vectorstore
+    volumes:
+      - chroma-data:/data/vectorstore
+    depends_on:
+      redis:
+        condition: service_healthy
+      phoenix:
+        condition: service_started
+
+volumes:
+  redis-data:
+  phoenix-data:
+  chroma-data:
