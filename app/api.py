@@ -13,6 +13,7 @@ from app.jobs import JobStore
 from app.observability import estado_observabilidad, iniciar_observabilidad
 from app.rag.models import ConsultaConocimiento, RespuestaRAG
 from app.redis_checkpointer import AsyncRedisCheckpointer
+from app.schemas import HealthView, JobView, TaskCreated
 from app.worker import WorkerPool
 
 
@@ -80,10 +81,10 @@ def create_app(
         version="2.0.0", lifespan=lifespan,
     )
 
-    @app.get("/health")
-    async def health() -> dict[str, Any]:
+    @app.get("/health", response_model=HealthView)
+    async def health() -> HealthView:
         pong = await app.state.redis.ping()
-        return {"status": "ok", "redis": bool(pong), "observabilidad": estado_observabilidad()}
+        return HealthView(status="ok", redis=bool(pong), observabilidad=estado_observabilidad())
 
     @app.post("/knowledge/query")
     async def knowledge_query(body: ConsultaConocimiento) -> RespuestaRAG:
@@ -92,26 +93,26 @@ def create_app(
             raise HTTPException(status_code=503, detail="la base de conocimiento no está disponible")
         return await app.state.knowledge.preguntar(body.pregunta)
 
-    @app.post("/tasks", status_code=202)
-    async def create_task(request: TaskRequest) -> dict[str, str]:
+    @app.post("/tasks", status_code=202, response_model=TaskCreated)
+    async def create_task(request: TaskRequest) -> TaskCreated:
         job_id = uuid.uuid4().hex[:12]
         await app.state.store.create(job_id, request.query)               # 1) estado inicial ANTES de encolar
         await app.state.store.enqueue({"job_id": job_id, "action": "start"})  # 2) cola Redis
-        return {"job_id": job_id, "status": jobs.PENDING}                  # 3) responde en milisegundos
+        return TaskCreated(job_id=job_id, status=jobs.PENDING)             # 3) responde en milisegundos
 
-    @app.get("/tasks/{job_id}")
-    async def get_task(job_id: str) -> dict[str, Any]:
+    @app.get("/tasks/{job_id}", response_model=JobView, response_model_exclude_none=True)
+    async def get_task(job_id: str) -> JobView:
         job = await app.state.store.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job no encontrado")
-        return job
+        return JobView(**job)  # valida el estado que viene de Redis antes de responder
 
-    @app.get("/status/{job_id}")  # alias del ejercicio de la Unidad 2
-    async def get_status(job_id: str) -> dict[str, Any]:
+    @app.get("/status/{job_id}", response_model=JobView, response_model_exclude_none=True)  # alias del ejercicio de la Unidad 2
+    async def get_status(job_id: str) -> JobView:
         return await get_task(job_id)
 
-    @app.post("/tasks/{job_id}/approve", status_code=202)
-    async def approve_task(job_id: str, body: ApprovalRequest) -> dict[str, str]:
+    @app.post("/tasks/{job_id}/approve", status_code=202, response_model=TaskCreated)
+    async def approve_task(job_id: str, body: ApprovalRequest) -> TaskCreated:
         job = await app.state.store.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job no encontrado")
@@ -119,7 +120,7 @@ def create_app(
             raise HTTPException(status_code=409, detail=f"el job está en estado '{job['status']}', no espera aprobación")
         await app.state.store.update(job_id, status=jobs.RUNNING)
         await app.state.store.enqueue({"job_id": job_id, "action": "resume", "resume": body.model_dump()})
-        return {"job_id": job_id, "status": jobs.RUNNING}
+        return TaskCreated(job_id=job_id, status=jobs.RUNNING)
 
     return app
 

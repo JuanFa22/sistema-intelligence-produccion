@@ -11,7 +11,8 @@ from langgraph.prebuilt import create_react_agent
 
 from app import config
 from app.agents.common import herramientas_usadas, respuesta_final
-from app.state import Contribution, OrchestratorState
+from app.schemas import CalcularVariacionArgs, ContributionModel, SerieVentas, Variacion, VentasPorMesArgs
+from app.state import OrchestratorState
 
 PROMPT = (
     "Sos el Agente de Análisis. Calculás con tus herramientas, nunca de memoria. "
@@ -28,7 +29,7 @@ def _ventas() -> tuple[dict[str, Any], ...]:
         return tuple({**r, "unidades": int(r["unidades"]), "monto": float(r["monto"])} for r in csv.DictReader(fh))
 
 
-@tool
+@tool(args_schema=VentasPorMesArgs)
 async def ventas_por_mes(producto: str, region: str | None = None) -> dict[str, Any] | str:
     """Devuelve la serie mensual (unidades y monto en ARS) de un producto, opcionalmente de una región.
 
@@ -54,12 +55,13 @@ async def ventas_por_mes(producto: str, region: str | None = None) -> dict[str, 
             m = meses.setdefault(r["mes"], {"unidades": 0, "monto_ars": 0.0})
             m["unidades"] += r["unidades"]
             m["monto_ars"] += r["monto"]
-        return {"producto": sel[0]["producto"], "region": region or "todas", "meses": dict(sorted(meses.items()))}
+        serie = SerieVentas(producto=sel[0]["producto"], region=region or "todas", meses=dict(sorted(meses.items())))
+        return serie.model_dump()  # salida validada con Pydantic
 
     return await asyncio.to_thread(_calcular)
 
 
-@tool
+@tool(args_schema=CalcularVariacionArgs)
 async def calcular_variacion(valor_actual: float, valor_anterior: float) -> dict[str, float] | str:
     """Calcula la variación porcentual entre dos valores (actual vs. anterior).
 
@@ -68,8 +70,8 @@ async def calcular_variacion(valor_actual: float, valor_anterior: float) -> dict
     """
     if valor_anterior == 0:
         return "ERROR: el valor anterior es 0; no se puede calcular una variación porcentual."
-    return {"diferencia": round(valor_actual - valor_anterior, 2),
-            "variacion_pct": round((valor_actual - valor_anterior) / valor_anterior * 100, 2)}
+    return Variacion(diferencia=round(valor_actual - valor_anterior, 2),
+                     variacion_pct=round((valor_actual - valor_anterior) / valor_anterior * 100, 2)).model_dump()
 
 
 TOOLS = [ventas_por_mes, calcular_variacion]
@@ -85,10 +87,10 @@ def crear_nodo_analista(model: BaseChatModel):
         instruccion = f"{state['instruction']}\n\nDatos de mercado aportados por el Investigador:\n{contexto}"
         resultado = await agente.ainvoke({"messages": [HumanMessage(content=instruccion)]})
         salida = respuesta_final(resultado["messages"]) or "Sin análisis."
-        aporte: Contribution = {
-            "agent": "Analista", "step": paso, "instruction": state["instruction"],
-            "output": salida, "tools_used": herramientas_usadas(resultado["messages"]),
-        }
+        aporte = ContributionModel(  # contrato Pydantic del estado compartido
+            agent="Analista", step=paso, instruction=state["instruction"],
+            output=salida, tools_used=herramientas_usadas(resultado["messages"]),
+        ).model_dump()
         return {
             "messages": [HumanMessage(content=salida, name="Analista")],
             "analysis_output": salida,

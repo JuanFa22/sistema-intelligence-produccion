@@ -13,7 +13,8 @@ from langgraph.prebuilt import create_react_agent
 from app import config
 from app.agents.common import herramientas_usadas, respuesta_final
 from app.rag.store import buscar_fragmentos
-from app.state import Contribution, OrchestratorState
+from app.schemas import BuscarMercadoArgs, ConsultarConocimientoArgs, ContributionModel, DocumentoMercado
+from app.state import OrchestratorState
 
 PROMPT = (
     "Sos el Agente de Investigación. Tu única tarea es buscar información con tus herramientas y "
@@ -29,14 +30,15 @@ PROMPT = (
 
 @lru_cache(maxsize=1)
 def _documentos() -> tuple[dict[str, Any], ...]:
-    return tuple(json.loads(config.MERCADO_JSON.read_text(encoding="utf-8")))
+    crudos = json.loads(config.MERCADO_JSON.read_text(encoding="utf-8"))
+    return tuple(DocumentoMercado.model_validate(d).model_dump() for d in crudos)  # salida validada con Pydantic
 
 
 def _tokens(texto: str) -> set[str]:
     return {t for t in re.findall(r"[a-záéíóúñ]+", texto.lower()) if len(t) > 2}
 
 
-@tool
+@tool(args_schema=BuscarMercadoArgs)
 async def buscar_mercado(consulta: str, max_resultados: int = 3) -> str:
     """Busca documentos de investigación de mercado (consumo masivo, helados, golosinas, galletitas).
 
@@ -65,7 +67,7 @@ async def buscar_mercado(consulta: str, max_resultados: int = 3) -> str:
     return await asyncio.to_thread(_buscar)
 
 
-@tool
+@tool(args_schema=ConsultarConocimientoArgs)
 async def consultar_conocimiento(consulta: str) -> str:
     """Busca en la base de conocimiento INTERNA de la empresa (RAG sobre ChromaDB).
 
@@ -96,10 +98,10 @@ def crear_nodo_investigador(model: BaseChatModel):
         instruccion = state["instruction"]
         resultado = await agente.ainvoke({"messages": [HumanMessage(content=instruccion)]})
         salida = respuesta_final(resultado["messages"]) or "Sin resultados."
-        aporte: Contribution = {
-            "agent": "Investigador", "step": paso, "instruction": instruccion,
-            "output": salida, "tools_used": herramientas_usadas(resultado["messages"]),
-        }
+        aporte = ContributionModel(  # contrato Pydantic del estado compartido
+            agent="Investigador", step=paso, instruction=instruccion,
+            output=salida, tools_used=herramientas_usadas(resultado["messages"]),
+        ).model_dump()
         return {
             "messages": [HumanMessage(content=salida, name="Investigador")],
             "research_output": salida,

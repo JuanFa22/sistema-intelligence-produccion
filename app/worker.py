@@ -12,6 +12,7 @@ from app import config, jobs
 from app.agents.common import texto
 from app.jobs import JobStore
 from app.observability import run_config, traceable
+from app.schemas import ContributionResumen, DecisionResumen, JobResult
 
 
 class WorkerPool:
@@ -74,13 +75,13 @@ class WorkerPool:
         v = snapshot.values
         aprobacion = v.get("approval") or {}
         rechazado = bool(v.get("critical")) and not aprobacion.get("aprobado", False)
-        resultado = {
-            "final_answer": v.get("final_answer", ""),
-            "critical": bool(v.get("critical")),
-            "approval": aprobacion.get("aprobado"),
-            "action_result": v.get("action_result", ""),
-            "steps": v.get("step_count", 0),
-            "decisions": [{"step": d["step"], "next": d["next_agent"], "reason": d["reason"]} for d in v.get("decisions", [])],
-            "contributions": [{"agent": c["agent"], "tools": c["tools_used"]} for c in v.get("contributions", [])],
-        }
+        resultado = JobResult(  # contrato Pydantic: se valida ANTES de guardarlo en Redis
+            final_answer=v.get("final_answer", ""),
+            critical=bool(v.get("critical")),
+            approval=aprobacion.get("aprobado"),
+            action_result=v.get("action_result", ""),
+            steps=v.get("step_count", 0),
+            decisions=[DecisionResumen(step=d["step"], next=d["next_agent"], reason=d["reason"]) for d in v.get("decisions", [])],
+            contributions=[ContributionResumen(agent=c["agent"], tools=c["tools_used"]) for c in v.get("contributions", [])],
+        ).model_dump()
         await self.store.update(job_id, status=jobs.REJECTED if rechazado else jobs.COMPLETED, result=resultado, finished_at=time.time())

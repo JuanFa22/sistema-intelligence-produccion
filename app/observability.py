@@ -7,7 +7,7 @@ LangSmith:
 LangChain/LangGraph envían trazas automáticamente cuando están definidas estas variables:
     LANGSMITH_TRACING=true
     LANGSMITH_API_KEY=<tu clave>
-    LANGSMITH_PROJECT=api-multiagente-produccion
+    LANGSMITH_PROJECT=sistema-intelligence
 Cada job se ejecuta dentro de un span raíz `procesar_job` (decorador @traceable), de modo que en
 LangSmith se ve UNA traza por job con la jerarquía: job -> grafo -> nodo/agente -> herramienta / modelo.
 """
@@ -38,7 +38,7 @@ def iniciar_observabilidad() -> None:
     from phoenix.otel import register
 
     url = os.getenv("PHOENIX_URL", "http://localhost:6006")
-    proyecto = os.getenv("PHOENIX_PROJECT", "api-multiagente-produccion")
+    proyecto = os.getenv("PHOENIX_PROJECT", "sistema-intelligence")
     tracer_provider = register(
         project_name=proyecto, endpoint=f"{url}/v1/traces", batch=False, set_global_tracer_provider=False
     )
@@ -53,7 +53,7 @@ def tracing_activo() -> bool:
 
 def estado_observabilidad() -> str:
     if phoenix_activo():
-        return f"Phoenix ACTIVO (proyecto: {os.getenv('PHOENIX_PROJECT', 'api-multiagente-produccion')}, {os.getenv('PHOENIX_URL', 'http://localhost:6006')})"
+        return f"Phoenix ACTIVO (proyecto: {os.getenv('PHOENIX_PROJECT', 'sistema-intelligence')}, {os.getenv('PHOENIX_URL', 'http://localhost:6006')})"
     if tracing_activo():
         return f"LangSmith ACTIVO (proyecto: {os.getenv('LANGSMITH_PROJECT', 'default')})"
     return "LangSmith DESACTIVADO (definí LANGSMITH_TRACING=true y LANGSMITH_API_KEY en .env)"
@@ -76,6 +76,6 @@ def run_config(job_id: str, accion: str) -> dict[str, Any]:
         "configurable": {"thread_id": job_id},          # thread_id = job_id -> checkpoints en Redis
         "recursion_limit": config.RECURSION_LIMIT,
         "run_name": f"job-{accion}",
-        "tags": ["api-multiagente", f"accion:{accion}", f"prompt:{config.PROMPT_TEMPLATE_VERSION}"],
+        "tags": ["sistema-intelligence", f"accion:{accion}", f"prompt:{config.PROMPT_TEMPLATE_VERSION}"],
         "metadata": {"job_id": job_id, "prompt_template_version": config.PROMPT_TEMPLATE_VERSION},
     }

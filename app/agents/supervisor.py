@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 
 from app import config
 from app.agents.common import texto
-from app.state import Decision, NextAgent, OrchestratorState
+from app.schemas import DecisionModel
+from app.state import OrchestratorState
 
 SUPERVISOR_PROMPT = (
     "Sos el Supervisor de un equipo de dos especialistas:\n"
@@ -87,8 +88,8 @@ def crear_nodo_supervisor(model: BaseChatModel):
             print(f"[Supervisor] fallo del LLM ({type(exc).__name__}); uso regla de respaldo.")
             decision = _regla_de_respaldo(state)
         final, guarda = aplicar_guardas(decision, state)
-        registro: Decision = {"step": paso, "next_agent": final.next_agent, "reason": final.reason,
-                              "instruction": final.instruction, "guard": guarda}
+        registro = DecisionModel(step=paso, next_agent=final.next_agent, reason=final.reason,
+                                 instruction=final.instruction, guard=guarda).model_dump()
         return {
             "next_agent": final.next_agent,
             "instruction": final.instruction,
