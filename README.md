@@ -1,4 +1,4 @@
-﻿# Sistema Intelligence de grado de producción
+# Sistema Intelligence de grado de producción
 
 **RAG (ChromaDB) + agentes con Supervisor (LangGraph) + API asíncrona (FastAPI + Redis) + Human-in-the-loop + trazabilidad (Arize Phoenix).**
 
@@ -116,7 +116,7 @@ sequenceDiagram
 | `knowledge/` | Documentos de la base de conocimiento (ficticios, caso helados). |
 | `data/` | Ventas internas (CSV) y notas de mercado (JSON), ficticias. |
 | `scripts/load_test.py` | Prueba de carga: 5 peticiones concurrentes. |
-| `tests/` | 28 pruebas offline (fakeredis, embeddings y modelos simulados). |
+| `tests/` | 30 pruebas offline (fakeredis, embeddings y modelos simulados). |
 | `Dockerfile`, `docker-compose.yml` | Despliegue local: solo Redis, o todo el sistema con `--profile full`. |
 
 ## Cómo correrlo (Windows PowerShell)
@@ -273,11 +273,20 @@ config = {"configurable": {"thread_id": job_id}, ...}
 await graph.ainvoke(entrada, config)   # app/worker.py
 ```
 
+- **Interfaz oficial de LangGraph:** `AsyncRedisCheckpointer` hereda de `BaseCheckpointSaver` e implementa `aget_tuple`, `alist`, `aput`, `aput_writes` y `adelete_thread`, así que se pasa a `compile(checkpointer=...)` igual que `MemorySaver`, `SqliteSaver` o `PostgresSaver`. Se eligió Redis porque ya es la cola de jobs y no requiere módulos extra.
+- **Memoria entre mensajes (mismo `thread_id`):** si se invoca el grafo por segunda vez con el mismo `thread_id`, recupera el historial y el estado anteriores sin reenviarlos; otro `thread_id` empieza de cero. Lo demuestra [`tests/test_checkpointer.py`](tests/test_checkpointer.py) (`test_segundo_mensaje_con_el_mismo_thread_id_recupera_el_historial`, con el checkpointer de Redis y con `InMemorySaver`).
 - **Continuidad:** el estado del hilo se guarda en cada paso. Con la acción crítica el grafo se pausa con `interrupt()` y se reanuda con `Command(resume=...)` usando el mismo `thread_id`, incluso con un checkpointer nuevo o después de reiniciar la API.
 - **Pruebas:** [`tests/test_checkpointer.py`](tests/test_checkpointer.py) (`test_pausa_y_reanuda_con_un_checkpointer_nuevo`, `test_hilos_aislados_y_borrado`) y [`tests/test_api.py`](tests/test_api.py) (`test_el_estado_sobrevive_al_reinicio_de_la_api`).
 - **Estado de los jobs** en Redis, con `FAILED` ante cualquier excepción ([`app/jobs.py`](app/jobs.py)).
 
-**Observabilidad con herramienta externa (Arize Phoenix, local).** Con `OBSERVABILITY=phoenix` se instrumenta LangChain/LangGraph con OpenInference ([`app/observability.py`](app/observability.py)). Cada ejecución registra entradas y salidas de cada nodo, llamadas a herramientas con argumentos y retorno, tokens, costo y latencia por llamada. LangSmith queda como alternativa configurable. La evidencia real está en la sección *Resultados y trazas*.
+**Observabilidad con herramienta externa (Arize Phoenix, local).** Con `OBSERVABILITY=phoenix` se instrumenta LangChain/LangGraph con OpenInference ([`app/observability.py`](app/observability.py)). Cada ejecución registra entradas y salidas de cada nodo, llamadas a herramientas con argumentos y retorno, tokens, costo y latencia por llamada. LangSmith queda como alternativa configurable. Qué registra cada traza real (ver capturas en *Resultados y trazas*):
+
+- Entradas y salidas de cada nodo y agente (supervisor, Investigador, Analista, síntesis, `aprobacion_humana`, `ejecutar_accion`).
+- Cada invocación de herramienta con sus argumentos y su retorno (`buscar_mercado`, `consultar_conocimiento`, `ventas_por_mes`, `calcular_variacion`) y el retriever con los fragmentos recuperados.
+- Tokens, costo y latencia de cada llamada al LLM (P50/P95/P99 en el panel de Phoenix).
+- Errores y reintentos: el cliente de Gemini reintenta ante el límite del plan gratuito (`LLM_MAX_RETRIES`), esa espera se ve en la latencia, y cualquier excepción deja el job en `FAILED`.
+
+La evidencia real está en la sección *Resultados y trazas*.
 
 ### 4. Documentación y despliegue (15 %)
 

@@ -43,3 +43,40 @@ async def test_hilos_aislados_y_borrado() -> None:
     await saver.adelete_thread("a")
     assert (await saver.aget_tuple({"configurable": {"thread_id": "a"}})) is None
     assert (await saver.aget_tuple({"configurable": {"thread_id": "b"}})) is not None
+
+
+# ------------------------------------------------------------------ continuidad de memoria (mismo thread_id)
+import pytest
+from langgraph.checkpoint.memory import InMemorySaver
+
+
+def _grafo_chat(saver):
+    """Grafo mínimo de conversación: cada turno responde contando cuántos mensajes recuerda."""
+
+    def responder(state: MessagesState):
+        return {"messages": [("ai", f"recuerdo {len(state['messages'])} mensajes")]}
+
+    b = StateGraph(MessagesState)
+    b.add_node("responder", responder)
+    b.add_edge(START, "responder")
+    b.add_edge("responder", END)
+    return b.compile(checkpointer=saver)
+
+
+@pytest.mark.parametrize("fabrica", ["redis", "memoria"])
+async def test_segundo_mensaje_con_el_mismo_thread_id_recupera_el_historial(fabrica) -> None:
+    saver = AsyncRedisCheckpointer(fakeredis.FakeAsyncRedis()) if fabrica == "redis" else InMemorySaver()
+    g = _grafo_chat(saver)
+    cfg = {"configurable": {"thread_id": "conversacion-1"}}
+
+    r1 = await g.ainvoke({"messages": [HumanMessage("hola")]}, cfg)
+    assert r1["messages"][-1].content == "recuerdo 1 mensajes"
+
+    # Segundo mensaje, mismo thread_id: el grafo recupera el historial previo (1 humano + 1 IA) sin reenviarlo
+    r2 = await g.ainvoke({"messages": [HumanMessage("¿seguís ahí?")]}, cfg)
+    assert [m.content for m in r2["messages"][:3]] == ["hola", "recuerdo 1 mensajes", "¿seguís ahí?"]
+    assert r2["messages"][-1].content == "recuerdo 3 mensajes"
+
+    # Otro thread_id empieza de cero: la memoria está aislada por hilo
+    r3 = await g.ainvoke({"messages": [HumanMessage("hola")]}, {"configurable": {"thread_id": "conversacion-2"}})
+    assert r3["messages"][-1].content == "recuerdo 1 mensajes"
