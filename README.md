@@ -1,4 +1,4 @@
-# Sistema Intelligence de grado de producción
+﻿# Sistema Intelligence de grado de producción
 
 **RAG (ChromaDB) + agentes con Supervisor (LangGraph) + API asíncrona (FastAPI + Redis) + Human-in-the-loop + trazabilidad (Arize Phoenix).**
 
@@ -116,7 +116,7 @@ sequenceDiagram
 | `knowledge/` | Documentos de la base de conocimiento (ficticios, caso helados). |
 | `data/` | Ventas internas (CSV) y notas de mercado (JSON), ficticias. |
 | `scripts/load_test.py` | Prueba de carga: 5 peticiones concurrentes. |
-| `tests/` | 27 pruebas offline (fakeredis, embeddings y modelos simulados). |
+| `tests/` | 28 pruebas offline (fakeredis, embeddings y modelos simulados). |
 | `Dockerfile`, `docker-compose.yml` | Despliegue local: solo Redis, o todo el sistema con `--profile full`. |
 
 ## Cómo correrlo (Windows PowerShell)
